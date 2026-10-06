@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TechNest Support – Autonomous Escalation Agent</title>
+<style>
+:root{--bg:#f4f5f8;--card:#fff;--tx:#1d2330;--mu:#6b7280;--bd:#d9dce3;--pr:#2563eb;--ok:#16a34a;--no:#dc2626;--wa:#d97706;--ev:#f8f9fb;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151c;--card:#1b202b;--tx:#e8eaf0;--mu:#9aa3b2;--bd:#2d3443;--ev:#222836}}
+:root[data-theme="dark"]{--bg:#12151c;--card:#1b202b;--tx:#e8eaf0;--mu:#9aa3b2;--bd:#2d3443;--ev:#222836}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 2px}.sub{color:var(--mu);font-size:13px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+label{font-size:13px;color:var(--mu);display:block;margin-top:8px}
+input,select,textarea,button{font:inherit;width:100%;box-sizing:border-box;padding:9px 10px;margin-top:4px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx)}
+button{background:var(--pr);color:#fff;border:0;cursor:pointer;font-weight:600}
+button.ok{background:var(--ok)}button.no{background:var(--no)}button.ghost{background:transparent;color:var(--pr);border:1px solid var(--pr)}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.badge{display:inline-block;padding:2px 10px;border-radius:99px;background:var(--ev);border:1px solid var(--bd);font-size:12px;margin-right:4px}
+.ev{padding:8px 10px;border-left:4px solid var(--bd);margin:8px 0;background:var(--ev);border-radius:0 8px 8px 0}
+.ev.agent{border-color:var(--pr)}.ev.customer{border-color:var(--ok)}.ev.system{border-color:var(--wa)}
+.t{color:var(--mu);font-size:12px}
+.lv{display:flex;gap:6px;margin:10px 0}.lv div{flex:1;text-align:center;padding:6px 2px;border-radius:8px;border:1px solid var(--bd);font-size:12px;color:var(--mu)}
+.lv .on{background:var(--pr);color:#fff;border-color:var(--pr)}.lv .done{opacity:.55}
+.offer{border:1px dashed var(--pr);border-radius:8px;padding:10px;margin:8px 0}
+</style></head><body><main>
+<h1>🛎️ TechNest Electronics — Customer Support</h1>
+<div class="sub">Autonomous agents: Rohan → Priya → Arjun. Escalates by itself until you're satisfied. <span class="badge" id="mode">checking agents…</span></div>
+
+<div class="card" id="form">
+<b>Raise a complaint</b>
+<label>Your name</label><input id="cu" placeholder="e.g. Aman">
+<label>Category</label>
+<select id="cat"><option>defective product</option><option>wrong item</option><option>billing error</option><option>delayed repair or delivery</option><option>warranty dispute</option><option>staff behavior</option></select>
+<label>What happened?</label><textarea id="desc" rows="3" placeholder="Describe the problem"></textarea>
+<div class="row"><div><label>Order amount (₹)</label><input id="amt" type="number" min="0" placeholder="12000"></div>
+<div><label>Days since purchase</label><input id="days" type="number" min="0" placeholder="10"></div></div>
+<button style="margin-top:12px" onclick="submitCase()">Submit complaint</button>
+</div>
+
+<div class="card" id="case" hidden>
+<div id="head"></div><div class="lv" id="lv"></div><div id="log"></div><div id="act"></div>
+</div>
+
+<script>
+const L={1:{n:"Rohan Verma",p:"Sales Associate",lim:2000,win:7,vou:0,acc:200,dis:0},
+2:{n:"Priya Nair",p:"Store Supervisor",lim:15000,win:15,vou:0,acc:200,dis:10},
+3:{n:"Arjun Mehta",p:"Store Manager",lim:100000,win:3650,vou:5000,acc:200,dis:10}};
+const MAXREJ=2,$=i=>document.getElementById(i);
+const esc_=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const who=l=>`${L[l].n} (${L[l].p})`, inr=n=>"₹"+Number(n).toLocaleString("en-IN");
+let C=null, sample=null, aiOn=false;
+
+(async()=>{try{sample=window.claude?await claude.use("sample"):null}catch(e){sample=null}
+ aiOn=!!sample;$("mode").textContent=aiOn?"AI agents (Claude)":"Rule-based agents";})();
+
+function powers(l){const p=L[l];return `Refund/replacement only if order value <= ${inr(p.lim)} and purchase is ${p.win<999?"<= "+p.win+" days old":"any age"}. Free accessory up to ${inr(p.acc)}. Voucher up to ${inr(p.vou)}. Discount on next purchase up to ${p.dis}%. Priority repair with free pickup and fee waiver: ${l>=2?"yes":"no"}.`}
+
+// Hard guardrail: code, not the AI, decides what each level may offer
+function check(l,acts){const p=L[l];
+ for(const a of acts){const t=a.type,v=Number(a.value)||0;
+  if(t==="refund"||t==="replacement"){
+   if(C.amount>p.lim)return `order value ${inr(C.amount)} exceeds my ${inr(p.lim)} limit`;
+   if(C.days>p.win)return `purchase is ${C.days} days old, beyond my ${p.win}-day return window`;}
+  else if(t==="repair"){if(v&&l<2)return "priority repair needs supervisor authority"}
+  else if(t==="waive_fees"){if(l<2)return "fee waivers need supervisor authority"}
+  else if(t==="voucher"){if(v>p.vou)return `voucher of ${inr(v)} exceeds my limit of ${inr(p.vou)}`}
+  else if(t==="accessory"){if(v>p.acc)return "accessory value exceeds my limit"}
+  else if(t==="discount"){if(v>p.dis)return `${v}% discount exceeds my ${p.dis}% limit`}
+  else if(t!=="apology")return "unknown action "+t;}
+ return null}
+
+function fmt(a){const v=Number(a.value)||0;
+ return({refund:`Full refund of ${inr(C.amount)}`,replacement:"Free replacement",repair:v?"Priority repair + free pickup/drop":"Standard repair ticket",
+ voucher:`${inr(v)} voucher`,accessory:`Free accessory (${inr(v)})`,discount:`${v}% off your next purchase`,waive_fees:"Service/restocking fees waived",apology:"Formal apology"})[a.type]||a.type}
+
+const BASE={"defective product":["replacement","refund"],"wrong item":["replacement","refund"],"billing error":["refund","refund"],
+"delayed repair or delivery":["repair","refund"],"warranty dispute":["repair","replacement"],"staff behavior":["apology","voucher"]};
+function mockDecide(l){
+ const n=C.rejected.filter(r=>r.level===l).length,t=(BASE[C.category]||["replacement","refund"])[Math.min(n,1)];
+ const acts=[{type:t,value:(t==="repair"&&l>=2)?1:(t==="voucher"?Math.min(500,L[l].vou):0)}];
+ if(n>=1){l===3?acts.push({type:"voucher",value:500}):l===2?acts.push({type:"waive_fees"}):acts.push({type:"accessory",value:200})}
+ return{action:"propose",actions:acts,message:n?"I understand that wasn't enough. Let me improve my offer.":"I'm sorry about this. Here's what I can do for you."}}
+
+async function aiDecide(l){const p=L[l];
+ const prompt=`You are ${p.n}, ${p.p} at TechNest Electronics. Resolve the complaint using ONLY your powers: ${powers(l)} Be empathetic; propose the fairest, least costly fix. Never repeat a rejected offer - improve it within your powers using the customer's comments. If the fix needs power you lack, escalate.
+Case: ${JSON.stringify({customer:C.customer,category:C.category,description:C.description,order_value_inr:C.amount,days_since_purchase:C.days,rejected_offers:C.rejected})}
+Reply with ONLY JSON, either {"action":"propose","actions":[{"type":"refund|replacement|repair|voucher|accessory|discount|waive_fees|apology","value":number}],"message":"short message to customer"} or {"action":"escalate","reason":"short reason"}. (repair value: 1=priority+free pickup, 0=standard; voucher/accessory value in rupees; discount in percent)`;
+ const d=await sample.json(prompt,{modelTier:"quick",cache:false});
+ if(d.action==="escalate"&&d.reason)return d;
+ if(d.action==="propose"&&Array.isArray(d.actions)&&d.actions.length&&d.message)return d;
+ throw new Error("bad shape")}
+
+async function decide(l){
+ if(aiOn){try{return await aiDecide(l)}catch(e){if(e&&e.code==="not_granted"){aiOn=false;$("mode").textContent="Rule-based agents"}}}
+ await new Promise(r=>setTimeout(r,700));return mockDecide(l)}
+
+const log=(k,w,t)=>C.log.push({t:new Date().toLocaleTimeString(),k,w,text:t});
+function escalate(reason){const l=C.level;
+ if(l===3){C.status="human";log("system",who(3),`Could not resolve: ${reason}. Case sent to head-office human review.`);return}
+ C.level=l+1;C.rej=0;log("system",who(l),`Escalating to ${who(l+1)} — ${reason}`)}
+
+// The autonomous loop: runs until the customer accepts or humans take over
+async function run(){
+ while(C.status==="agent"){render();const l=C.level;
+  if(C.rej>=MAXREJ){escalate(`customer rejected ${MAXREJ} offers`);continue}
+  const d=await decide(l);
+  if(d.action==="escalate"){escalate(d.reason);continue}
+  const err=check(l,d.actions);
+  if(err){escalate(err);continue}
+  C.pending=d;C.status="customer";
+  log("agent",who(l),`${d.message} Offer: ${d.actions.map(fmt).join("; ")}`)}
+ render()}
+
+function submitCase(){
+ const desc=$("desc").value.trim();if(!desc){$("desc").focus();return}
+ C={customer:$("cu").value.trim()||"Customer",category:$("cat").value,description:desc,amount:+$("amt").value||0,days:+$("days").value||0,
+  level:1,rej:0,rejected:[],pending:null,status:"agent",log:[]};
+ log("customer",C.customer,`[${C.category}] ${desc} (${inr(C.amount)}, bought ${C.days} days ago)`);
+ log("system","System",`Case routed to ${who(1)}`);
+ $("form").hidden=true;$("case").hidden=false;run()}
+
+function respond(ok){
+ const l=C.level;
+ if(ok){C.status="resolved";log("customer",C.customer,"Accepted the offer. Satisfied.");log("system","System",`Case RESOLVED by ${who(l)}`);render();return}
+ const com=($("com")||{}).value?.trim()||"";C.rej++;
+ C.rejected.push({level:l,offer:C.pending.actions.map(fmt),comment:com});
+ log("customer",C.customer,"Rejected the offer."+(com?` Comment: ${com}`:""));
+ C.status="agent";C.pending=null;run()}
+
+function render(){
+ const lab={agent:"agent working",customer:"awaiting your reply",resolved:"resolved",human:"human review"}[C.status];
+ $("head").innerHTML=`<span class="badge">${lab}</span><span class="badge">Level ${C.level}</span>`;
+ $("lv").innerHTML=[1,2,3].map(i=>`<div class="${i===C.level?"on":i<C.level?"done":""}">L${i} · ${L[i].n.split(" ")[0]}<br>${L[i].p}</div>`).join("");
+ $("log").innerHTML=C.log.map(e=>`<div class="ev ${e.k}"><span class="t">${e.t} · ${esc_(e.w)}</span><br>${esc_(e.text)}</div>`).join("");
+ const a=$("act"),s=C.status;
+ if(s==="customer"){const keep=($("com")||{}).value||"";
+  a.innerHTML=`<div class="offer"><b>Offer from ${esc_(L[C.level].n)}</b><br>${C.pending.actions.map(x=>"• "+esc_(fmt(x))).join("<br>")}</div>
+  <input id="com" placeholder="Not happy? Tell us what you'd prefer (optional)"><div class="row" style="margin-top:6px"><button class="ok" onclick="respond(true)">Accept</button><button class="no" onclick="respond(false)">Reject</button></div>`;$("com").value=keep}
+ else if(s==="agent")a.innerHTML=`<i class="t">${esc_(L[C.level].n)} is working on your case…</i>`;
+ else{a.innerHTML=`<b>${s==="resolved"?"✅ Resolved. Thank you!":"A senior executive from head office will contact you personally."}</b><button class="ghost" style="margin-top:10px" onclick="location.reload()">Raise another complaint</button>`}}
+</script></main></body></html>
